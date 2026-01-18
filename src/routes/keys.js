@@ -2,6 +2,7 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const supabase = require('../db/supabase');
 const { verifyToken, requireAdmin, requireModifyAccess } = require('../middleware/auth');
+const { keyCreationLimiter, securityLog } = require('../middleware/security');
 
 const router = express.Router();
 

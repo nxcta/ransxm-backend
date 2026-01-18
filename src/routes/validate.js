@@ -1,18 +1,31 @@
 const express = require('express');
 const supabase = require('../db/supabase');
+const { validateLimiter, requireApiKey, securityLog, validateKeyFormat } = require('../middleware/security');
 
 const router = express.Router();
 
 // Validate key (called from Lua script)
-router.post('/', async (req, res) => {
+// Rate limited and optionally requires API key
+router.post('/', validateLimiter, requireApiKey, async (req, res) => {
     try {
         const { key, hwid, game_id, executor } = req.body;
-        const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
+        const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
         
         if (!key) {
+            securityLog('VALIDATE_NO_KEY', { hwid, game_id }, req);
             return res.json({ 
                 valid: false, 
                 error: 'No key provided' 
+            });
+        }
+        
+        // Basic key format validation
+        const cleanKey = key.toUpperCase().trim();
+        if (!validateKeyFormat(cleanKey)) {
+            securityLog('VALIDATE_INVALID_FORMAT', { key: cleanKey.substring(0, 10), hwid }, req);
+            return res.json({ 
+                valid: false, 
+                error: 'Invalid key format' 
             });
         }
         
@@ -20,10 +33,11 @@ router.post('/', async (req, res) => {
         const { data: keyData, error } = await supabase
             .from('keys')
             .select('*')
-            .eq('key_value', key.toUpperCase().trim())
+            .eq('key_value', cleanKey)
             .single();
         
         if (error || !keyData) {
+            securityLog('VALIDATE_KEY_NOT_FOUND', { key: cleanKey.substring(0, 10), hwid }, req);
             return res.json({ 
                 valid: false, 
                 error: 'Invalid key' 
@@ -146,6 +160,14 @@ router.post('/', async (req, res) => {
             timeRemaining = `${diffDays}d ${diffHours}h`;
         }
         
+        // Log successful validation
+        securityLog('VALIDATE_SUCCESS', { 
+            key: keyData.key_value.substring(0, 10) + '...', 
+            tier: keyData.tier, 
+            hwid: hwid ? hwid.substring(0, 10) + '...' : 'none',
+            game_id 
+        }, req);
+        
         res.json({
             valid: true,
             message: 'Key validated successfully',
@@ -153,14 +175,12 @@ router.post('/', async (req, res) => {
                 tier: keyData.tier || 'basic',
                 expires_at: keyData.expires_at,
                 time_remaining: timeRemaining,
-                uses_remaining: keyData.max_uses > 0 ? keyData.max_uses - keyData.current_uses - 1 : 'unlimited',
-                skip_validation: keyData.skip_validation,
-                validated: keyData.validated
+                uses_remaining: keyData.max_uses > 0 ? keyData.max_uses - keyData.current_uses - 1 : 'unlimited'
             }
         });
         
     } catch (error) {
-        console.error('Validation error:', error);
+        console.error('[ERROR] Validation:', error.message);
         res.json({ 
             valid: false, 
             error: 'Validation failed' 

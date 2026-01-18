@@ -1,7 +1,18 @@
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 require('dotenv').config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ransxm-secret-key';
+// Strong JWT secret - MUST be set in production
+const JWT_SECRET = process.env.JWT_SECRET;
+
+// Warn if using default (development only)
+if (!JWT_SECRET || JWT_SECRET.length < 32) {
+    console.warn('[SECURITY WARNING] JWT_SECRET not set or too weak! Set a strong secret in .env');
+    console.warn('[SECURITY WARNING] Generate one with: node -e "console.log(require(\'crypto\').randomBytes(64).toString(\'hex\'))"');
+}
+
+// Use the provided secret or generate a random one (not recommended for production)
+const SECRET = JWT_SECRET || crypto.randomBytes(64).toString('hex');
 
 // Role hierarchy: super_admin > admin > user
 const ROLE_LEVELS = {
@@ -21,10 +32,11 @@ const verifyToken = (req, res, next) => {
     const token = authHeader.split(' ')[1];
     
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = jwt.verify(token, SECRET);
         req.user = decoded;
         next();
     } catch (error) {
+        console.log('[AUTH] Token verification failed:', error.message);
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
 };
@@ -81,7 +93,7 @@ const generateToken = (user) => {
             role: user.role,
             key_id: user.key_id || null
         },
-        JWT_SECRET,
+        SECRET,
         { expiresIn: '7d' }
     );
 };

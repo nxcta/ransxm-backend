@@ -2,16 +2,34 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const supabase = require('../db/supabase');
 const { generateToken, verifyToken } = require('../middleware/auth');
+const { 
+    loginLimiter, 
+    registerLimiter, 
+    checkAccountLockout,
+    validateEmail,
+    validatePassword,
+    securityLog 
+} = require('../middleware/security');
 
 const router = express.Router();
 
 // Register new user (requires key for regular users)
-router.post('/register', async (req, res) => {
+router.post('/register', registerLimiter, async (req, res) => {
     try {
         const { email, password, key } = req.body;
         
+        // Validate input
         if (!email || !password) {
             return res.status(400).json({ error: 'Email and password required' });
+        }
+        
+        if (!validateEmail(email)) {
+            securityLog('REGISTER_INVALID_EMAIL', { email: email.substring(0, 20) }, req);
+            return res.status(400).json({ error: 'Invalid email format' });
+        }
+        
+        if (!validatePassword(password)) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters' });
         }
         
         if (!key) {
@@ -22,10 +40,11 @@ router.post('/register', async (req, res) => {
         const { data: existingUser } = await supabase
             .from('users')
             .select('id')
-            .eq('email', email)
+            .eq('email', email.toLowerCase().trim())
             .single();
         
         if (existingUser) {
+            securityLog('REGISTER_DUPLICATE_EMAIL', { email }, req);
             return res.status(400).json({ error: 'Email already registered' });
         }
         
@@ -104,28 +123,36 @@ router.post('/register', async (req, res) => {
     }
 });
 
-// Login
-router.post('/login', async (req, res) => {
+// Login (with rate limiting and account lockout)
+router.post('/login', loginLimiter, checkAccountLockout, async (req, res) => {
     try {
         const { email, password } = req.body;
         
+        // Validate input
         if (!email || !password) {
             return res.status(400).json({ error: 'Email and password required' });
+        }
+        
+        if (!validateEmail(email)) {
+            securityLog('INVALID_EMAIL_FORMAT', { email: email.substring(0, 20) }, req);
+            return res.status(400).json({ error: 'Invalid email format' });
         }
         
         // Find user
         const { data: user, error } = await supabase
             .from('users')
             .select('*')
-            .eq('email', email)
+            .eq('email', email.toLowerCase().trim())
             .single();
         
-        if (error) {
-            console.log('Login DB error:', error.message);
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-        
-        if (!user) {
+        if (error || !user) {
+            // Track failed attempt
+            const isLocked = req.trackFailedLogin();
+            securityLog('LOGIN_FAILED', { email, reason: 'User not found' }, req);
+            
+            if (isLocked) {
+                return res.status(429).json({ error: 'Too many failed attempts. Account locked for 30 minutes.' });
+            }
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         
@@ -133,9 +160,19 @@ router.post('/login', async (req, res) => {
         const validPassword = await bcrypt.compare(password, user.password_hash);
         
         if (!validPassword) {
-            console.log('Password mismatch for:', email);
+            // Track failed attempt
+            const isLocked = req.trackFailedLogin();
+            securityLog('LOGIN_FAILED', { email, reason: 'Wrong password' }, req);
+            
+            if (isLocked) {
+                return res.status(429).json({ error: 'Too many failed attempts. Account locked for 30 minutes.' });
+            }
             return res.status(401).json({ error: 'Invalid credentials' });
         }
+        
+        // Successful login - clear failed attempts
+        req.clearFailedAttempts();
+        securityLog('LOGIN_SUCCESS', { email, role: user.role }, req);
         
         const token = generateToken(user);
         
@@ -162,7 +199,7 @@ router.post('/login', async (req, res) => {
             key: keyInfo
         });
     } catch (error) {
-        console.error('Login error:', error);
+        console.error('[ERROR] Login:', error.message);
         res.status(500).json({ error: 'Login failed' });
     }
 });
