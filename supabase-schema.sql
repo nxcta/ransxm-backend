@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS keys (
     owner_id UUID REFERENCES users(id) ON DELETE SET NULL,
     hwid VARCHAR(255),
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'expired', 'banned')),
+    tier VARCHAR(20) DEFAULT 'basic' CHECK (tier IN ('basic', 'premium', 'ransxm')),
     expires_at TIMESTAMP WITH TIME ZONE,
     max_uses INTEGER DEFAULT 1,
     current_uses INTEGER DEFAULT 0,

@@ -134,6 +134,7 @@ router.post('/', async (req, res) => {
             valid: true,
             message: 'Key validated successfully',
             data: {
+                tier: keyData.tier || 'basic',
                 expires_at: keyData.expires_at,
                 time_remaining: timeRemaining,
                 uses_remaining: keyData.max_uses > 0 ? keyData.max_uses - keyData.current_uses - 1 : 'unlimited'
@@ -156,7 +157,7 @@ router.get('/check/:key', async (req, res) => {
         
         const { data: keyData, error } = await supabase
             .from('keys')
-            .select('status, expires_at')
+            .select('status, tier, expires_at')
             .eq('key_value', key.toUpperCase().trim())
             .single();
         
@@ -169,6 +170,7 @@ router.get('/check/:key', async (req, res) => {
         res.json({
             valid: keyData.status === 'active' && !isExpired,
             status: keyData.status,
+            tier: keyData.tier || 'basic',
             expires_at: keyData.expires_at
         });
         

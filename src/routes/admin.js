@@ -57,6 +57,17 @@ router.get('/stats', verifyToken, requireAdmin, async (req, res) => {
             return acc;
         }, {}) || {};
         
+        // Keys by tier
+        const { data: tierCounts } = await supabase
+            .from('keys')
+            .select('tier');
+        
+        const tierBreakdown = tierCounts?.reduce((acc, k) => {
+            const tier = k.tier || 'basic';
+            acc[tier] = (acc[tier] || 0) + 1;
+            return acc;
+        }, {}) || {};
+        
         res.json({
             stats: {
                 totalKeys: totalKeys || 0,
@@ -66,6 +77,7 @@ router.get('/stats', verifyToken, requireAdmin, async (req, res) => {
                 uniqueUsersToday: uniqueIPCount
             },
             statusBreakdown,
+            tierBreakdown,
             recentActivity: recentLogs || []
         });
         

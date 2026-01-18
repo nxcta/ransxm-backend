@@ -84,8 +84,15 @@ router.post('/', verifyToken, requireAdmin, async (req, res) => {
             owner_id = null,
             expires_at = null,
             max_uses = 1,
+            tier = 'basic',
             note = ''
         } = req.body;
+        
+        // Validate tier
+        const validTiers = ['basic', 'premium', 'ransxm'];
+        if (!validTiers.includes(tier)) {
+            return res.status(400).json({ error: 'Invalid tier. Must be: basic, premium, or ransxm' });
+        }
         
         const keyValue = generateKey();
         
@@ -95,6 +102,7 @@ router.post('/', verifyToken, requireAdmin, async (req, res) => {
                 key_value: keyValue,
                 owner_id,
                 status: 'active',
+                tier,
                 expires_at,
                 max_uses,
                 current_uses: 0,
@@ -123,11 +131,18 @@ router.post('/bulk', verifyToken, requireAdmin, async (req, res) => {
             count = 10,
             expires_at = null,
             max_uses = 1,
+            tier = 'basic',
             prefix = ''
         } = req.body;
         
         if (count > 100) {
             return res.status(400).json({ error: 'Maximum 100 keys per batch' });
+        }
+        
+        // Validate tier
+        const validTiers = ['basic', 'premium', 'ransxm'];
+        if (!validTiers.includes(tier)) {
+            return res.status(400).json({ error: 'Invalid tier. Must be: basic, premium, or ransxm' });
         }
         
         const keys = [];
@@ -136,6 +151,7 @@ router.post('/bulk', verifyToken, requireAdmin, async (req, res) => {
                 key_value: generateKey(),
                 owner_id: null,
                 status: 'active',
+                tier,
                 expires_at,
                 max_uses,
                 current_uses: 0,
@@ -164,12 +180,21 @@ router.post('/bulk', verifyToken, requireAdmin, async (req, res) => {
 // Update key (admin only)
 router.put('/:id', verifyToken, requireAdmin, async (req, res) => {
     try {
-        const { status, expires_at, max_uses, note, owner_id } = req.body;
+        const { status, expires_at, max_uses, tier, note, owner_id } = req.body;
+        
+        // Validate tier if provided
+        if (tier !== undefined) {
+            const validTiers = ['basic', 'premium', 'ransxm'];
+            if (!validTiers.includes(tier)) {
+                return res.status(400).json({ error: 'Invalid tier. Must be: basic, premium, or ransxm' });
+            }
+        }
         
         const updateData = {};
         if (status !== undefined) updateData.status = status;
         if (expires_at !== undefined) updateData.expires_at = expires_at;
         if (max_uses !== undefined) updateData.max_uses = max_uses;
+        if (tier !== undefined) updateData.tier = tier;
         if (note !== undefined) updateData.note = note;
         if (owner_id !== undefined) updateData.owner_id = owner_id;
         
@@ -250,6 +275,111 @@ router.delete('/:id', verifyToken, requireAdmin, async (req, res) => {
     } catch (error) {
         console.error('Delete key error:', error);
         res.status(500).json({ error: 'Failed to delete key' });
+    }
+});
+
+// Batch delete keys (admin only)
+router.post('/batch-delete', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { ids } = req.body;
+        
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ error: 'No key IDs provided' });
+        }
+        
+        if (ids.length > 100) {
+            return res.status(400).json({ error: 'Maximum 100 keys per batch delete' });
+        }
+        
+        const { error } = await supabase
+            .from('keys')
+            .delete()
+            .in('id', ids);
+        
+        if (error) throw error;
+        
+        res.json({ message: `${ids.length} keys deleted successfully` });
+    } catch (error) {
+        console.error('Batch delete error:', error);
+        res.status(500).json({ error: 'Failed to delete keys' });
+    }
+});
+
+// Batch update status (admin only)
+router.post('/batch-status', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { ids, status } = req.body;
+        
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ error: 'No key IDs provided' });
+        }
+        
+        const validStatuses = ['active', 'disabled', 'banned'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Invalid status' });
+        }
+        
+        const { error } = await supabase
+            .from('keys')
+            .update({ status })
+            .in('id', ids);
+        
+        if (error) throw error;
+        
+        res.json({ message: `${ids.length} keys updated to ${status}` });
+    } catch (error) {
+        console.error('Batch status error:', error);
+        res.status(500).json({ error: 'Failed to update keys' });
+    }
+});
+
+// Export keys (admin only)
+router.get('/export', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { format = 'csv', status, tier } = req.query;
+        
+        let query = supabase
+            .from('keys')
+            .select('key_value, status, tier, hwid, current_uses, max_uses, expires_at, created_at, note')
+            .order('created_at', { ascending: false });
+        
+        if (status) query = query.eq('status', status);
+        if (tier) query = query.eq('tier', tier);
+        
+        const { data: keys, error } = await query;
+        
+        if (error) throw error;
+        
+        if (format === 'txt') {
+            // Simple text format - just keys
+            const txt = keys.map(k => k.key_value).join('\n');
+            res.setHeader('Content-Type', 'text/plain');
+            res.setHeader('Content-Disposition', 'attachment; filename=ransxm-keys.txt');
+            return res.send(txt);
+        }
+        
+        // CSV format
+        const headers = ['Key', 'Status', 'Tier', 'HWID', 'Uses', 'Max Uses', 'Expires', 'Created', 'Note'];
+        const rows = keys.map(k => [
+            k.key_value,
+            k.status,
+            k.tier || 'basic',
+            k.hwid || '',
+            k.current_uses,
+            k.max_uses === 0 ? 'Unlimited' : k.max_uses,
+            k.expires_at ? new Date(k.expires_at).toISOString() : 'Never',
+            new Date(k.created_at).toISOString(),
+            (k.note || '').replace(/,/g, ';')
+        ]);
+        
+        const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=ransxm-keys.csv');
+        res.send(csv);
+        
+    } catch (error) {
+        console.error('Export error:', error);
+        res.status(500).json({ error: 'Failed to export keys' });
     }
 });
 
