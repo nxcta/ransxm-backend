@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const supabase = require('../db/supabase');
-const { verifyToken, requireAdmin } = require('../middleware/auth');
+const { verifyToken, requireAdmin, requireModifyAccess } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -77,14 +77,15 @@ router.get('/:id', verifyToken, async (req, res) => {
     }
 });
 
-// Create single key (admin only)
-router.post('/', verifyToken, requireAdmin, async (req, res) => {
+// Create single key (super_admin only - admins can only view)
+router.post('/', verifyToken, requireModifyAccess, async (req, res) => {
     try {
         const { 
             owner_id = null,
             expires_at = null,
             max_uses = 1,
             tier = 'basic',
+            skip_validation = false,
             note = ''
         } = req.body;
         
@@ -96,6 +97,9 @@ router.post('/', verifyToken, requireAdmin, async (req, res) => {
         
         const keyValue = generateKey();
         
+        // RANSXM tier keys always skip validation
+        const shouldSkipValidation = tier === 'ransxm' ? true : skip_validation;
+        
         const { data: newKey, error } = await supabase
             .from('keys')
             .insert({
@@ -103,6 +107,9 @@ router.post('/', verifyToken, requireAdmin, async (req, res) => {
                 owner_id,
                 status: 'active',
                 tier,
+                skip_validation: shouldSkipValidation,
+                validated: shouldSkipValidation, // Pre-validated if skipping
+                validated_at: shouldSkipValidation ? new Date().toISOString() : null,
                 expires_at,
                 max_uses,
                 current_uses: 0,
@@ -124,14 +131,15 @@ router.post('/', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Bulk create keys (admin only)
-router.post('/bulk', verifyToken, requireAdmin, async (req, res) => {
+// Bulk create keys (super_admin only)
+router.post('/bulk', verifyToken, requireModifyAccess, async (req, res) => {
     try {
         const { 
             count = 10,
             expires_at = null,
             max_uses = 1,
             tier = 'basic',
+            skip_validation = false,
             prefix = ''
         } = req.body;
         
@@ -145,6 +153,9 @@ router.post('/bulk', verifyToken, requireAdmin, async (req, res) => {
             return res.status(400).json({ error: 'Invalid tier. Must be: basic, premium, or ransxm' });
         }
         
+        // RANSXM tier keys always skip validation
+        const shouldSkipValidation = tier === 'ransxm' ? true : skip_validation;
+        
         const keys = [];
         for (let i = 0; i < count; i++) {
             keys.push({
@@ -152,6 +163,9 @@ router.post('/bulk', verifyToken, requireAdmin, async (req, res) => {
                 owner_id: null,
                 status: 'active',
                 tier,
+                skip_validation: shouldSkipValidation,
+                validated: shouldSkipValidation,
+                validated_at: shouldSkipValidation ? new Date().toISOString() : null,
                 expires_at,
                 max_uses,
                 current_uses: 0,
@@ -177,10 +191,10 @@ router.post('/bulk', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Update key (admin only)
-router.put('/:id', verifyToken, requireAdmin, async (req, res) => {
+// Update key (super_admin only)
+router.put('/:id', verifyToken, requireModifyAccess, async (req, res) => {
     try {
-        const { status, expires_at, max_uses, tier, note, owner_id } = req.body;
+        const { status, expires_at, max_uses, tier, skip_validation, note, owner_id } = req.body;
         
         // Validate tier if provided
         if (tier !== undefined) {
@@ -194,7 +208,16 @@ router.put('/:id', verifyToken, requireAdmin, async (req, res) => {
         if (status !== undefined) updateData.status = status;
         if (expires_at !== undefined) updateData.expires_at = expires_at;
         if (max_uses !== undefined) updateData.max_uses = max_uses;
-        if (tier !== undefined) updateData.tier = tier;
+        if (tier !== undefined) {
+            updateData.tier = tier;
+            // RANSXM tier always skips validation
+            if (tier === 'ransxm') {
+                updateData.skip_validation = true;
+                updateData.validated = true;
+                updateData.validated_at = new Date().toISOString();
+            }
+        }
+        if (skip_validation !== undefined) updateData.skip_validation = skip_validation;
         if (note !== undefined) updateData.note = note;
         if (owner_id !== undefined) updateData.owner_id = owner_id;
         
@@ -217,8 +240,8 @@ router.put('/:id', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Reset HWID (admin only)
-router.post('/:id/reset-hwid', verifyToken, requireAdmin, async (req, res) => {
+// Reset HWID (super_admin only)
+router.post('/:id/reset-hwid', verifyToken, requireModifyAccess, async (req, res) => {
     try {
         const { data: updatedKey, error } = await supabase
             .from('keys')
@@ -239,8 +262,8 @@ router.post('/:id/reset-hwid', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Reset Uses (admin only)
-router.post('/:id/reset-uses', verifyToken, requireAdmin, async (req, res) => {
+// Reset Uses (super_admin only)
+router.post('/:id/reset-uses', verifyToken, requireModifyAccess, async (req, res) => {
     try {
         const { data: updatedKey, error } = await supabase
             .from('keys')
@@ -261,8 +284,8 @@ router.post('/:id/reset-uses', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Delete key (admin only)
-router.delete('/:id', verifyToken, requireAdmin, async (req, res) => {
+// Delete key (super_admin only)
+router.delete('/:id', verifyToken, requireModifyAccess, async (req, res) => {
     try {
         const { error } = await supabase
             .from('keys')
@@ -278,8 +301,8 @@ router.delete('/:id', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Batch delete keys (admin only)
-router.post('/batch-delete', verifyToken, requireAdmin, async (req, res) => {
+// Batch delete keys (super_admin only)
+router.post('/batch-delete', verifyToken, requireModifyAccess, async (req, res) => {
     try {
         const { ids } = req.body;
         
@@ -305,8 +328,8 @@ router.post('/batch-delete', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Batch update status (admin only)
-router.post('/batch-status', verifyToken, requireAdmin, async (req, res) => {
+// Batch update status (super_admin only)
+router.post('/batch-status', verifyToken, requireModifyAccess, async (req, res) => {
     try {
         const { ids, status } = req.body;
         

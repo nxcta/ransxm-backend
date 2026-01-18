@@ -52,6 +52,22 @@ router.post('/', async (req, res) => {
             });
         }
         
+        // === VALIDATION CHECK ===
+        // Keys that DON'T need validation:
+        // 1. RANSXM tier keys (always work)
+        // 2. Keys with skip_validation = true (giveaways, etc.)
+        // 3. Keys already validated by user registration
+        
+        const needsValidation = !keyData.skip_validation && keyData.tier !== 'ransxm';
+        
+        if (needsValidation && !keyData.validated) {
+            return res.json({
+                valid: false,
+                error: 'Key requires registration. Please register at ransxm.com to activate your key.',
+                requires_registration: true
+            });
+        }
+        
         // Check HWID first
         let hwidMatches = false;
         let isNewHwid = false;
@@ -137,7 +153,9 @@ router.post('/', async (req, res) => {
                 tier: keyData.tier || 'basic',
                 expires_at: keyData.expires_at,
                 time_remaining: timeRemaining,
-                uses_remaining: keyData.max_uses > 0 ? keyData.max_uses - keyData.current_uses - 1 : 'unlimited'
+                uses_remaining: keyData.max_uses > 0 ? keyData.max_uses - keyData.current_uses - 1 : 'unlimited',
+                skip_validation: keyData.skip_validation,
+                validated: keyData.validated
             }
         });
         

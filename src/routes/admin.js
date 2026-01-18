@@ -1,6 +1,7 @@
 const express = require('express');
+const bcrypt = require('bcryptjs');
 const supabase = require('../db/supabase');
-const { verifyToken, requireAdmin } = require('../middleware/auth');
+const { verifyToken, requireAdmin, requireSuperAdmin, requireModifyAccess } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -120,30 +121,48 @@ router.get('/logs', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
-// Get all users (admin only)
+// Get all users (admin can view, but see limited info)
 router.get('/users', verifyToken, requireAdmin, async (req, res) => {
     try {
         const { data: users, error } = await supabase
             .from('users')
-            .select('id, email, role, created_at')
+            .select('id, email, role, key_id, created_at')
             .order('created_at', { ascending: false });
         
         if (error) throw error;
         
-        res.json({ users });
+        // Get key info for users with keys
+        const usersWithKeys = await Promise.all(users.map(async (user) => {
+            if (user.key_id) {
+                const { data: keyData } = await supabase
+                    .from('keys')
+                    .select('key_value, tier, expires_at, status')
+                    .eq('id', user.key_id)
+                    .single();
+                return { ...user, key: keyData };
+            }
+            return user;
+        }));
+        
+        res.json({ users: usersWithKeys });
     } catch (error) {
         console.error('Get users error:', error);
         res.status(500).json({ error: 'Failed to fetch users' });
     }
 });
 
-// Update user role (admin only)
-router.put('/users/:id/role', verifyToken, requireAdmin, async (req, res) => {
+// Update user role (super_admin only)
+router.put('/users/:id/role', verifyToken, requireSuperAdmin, async (req, res) => {
     try {
         const { role } = req.body;
         
-        if (!['user', 'admin'].includes(role)) {
+        if (!['user', 'admin', 'super_admin'].includes(role)) {
             return res.status(400).json({ error: 'Invalid role' });
+        }
+        
+        // Prevent demoting yourself
+        if (req.params.id === req.user.id && role !== 'super_admin') {
+            return res.status(400).json({ error: 'Cannot demote yourself' });
         }
         
         const { data: updatedUser, error } = await supabase
@@ -162,6 +181,76 @@ router.put('/users/:id/role', verifyToken, requireAdmin, async (req, res) => {
     } catch (error) {
         console.error('Update role error:', error);
         res.status(500).json({ error: 'Failed to update role' });
+    }
+});
+
+// Delete user (super_admin only)
+router.delete('/users/:id', verifyToken, requireSuperAdmin, async (req, res) => {
+    try {
+        // Prevent deleting yourself
+        if (req.params.id === req.user.id) {
+            return res.status(400).json({ error: 'Cannot delete yourself' });
+        }
+        
+        const { error } = await supabase
+            .from('users')
+            .delete()
+            .eq('id', req.params.id);
+        
+        if (error) throw error;
+        
+        res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+        console.error('Delete user error:', error);
+        res.status(500).json({ error: 'Failed to delete user' });
+    }
+});
+
+// Create admin/mod user (super_admin only)
+router.post('/users', verifyToken, requireSuperAdmin, async (req, res) => {
+    try {
+        const { email, password, role = 'admin' } = req.body;
+        
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password required' });
+        }
+        
+        if (!['admin', 'super_admin'].includes(role)) {
+            return res.status(400).json({ error: 'Can only create admin or super_admin users' });
+        }
+        
+        // Check if user exists
+        const { data: existingUser } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', email)
+            .single();
+        
+        if (existingUser) {
+            return res.status(400).json({ error: 'Email already registered' });
+        }
+        
+        const passwordHash = await bcrypt.hash(password, 10);
+        
+        const { data: newUser, error } = await supabase
+            .from('users')
+            .insert({
+                email,
+                password_hash: passwordHash,
+                role
+            })
+            .select('id, email, role, created_at')
+            .single();
+        
+        if (error) throw error;
+        
+        res.status(201).json({
+            message: 'User created successfully',
+            user: newUser
+        });
+    } catch (error) {
+        console.error('Create user error:', error);
+        res.status(500).json({ error: 'Failed to create user' });
     }
 });
 

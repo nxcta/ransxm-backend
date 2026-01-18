@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS users (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin')),
+    role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('user', 'admin', 'super_admin')),
+    key_id UUID, -- For regular users, links to their key
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -18,6 +19,9 @@ CREATE TABLE IF NOT EXISTS keys (
     hwid VARCHAR(255),
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'expired', 'banned')),
     tier VARCHAR(20) DEFAULT 'basic' CHECK (tier IN ('basic', 'premium', 'ransxm')),
+    skip_validation BOOLEAN DEFAULT FALSE, -- If true, key works without user registration
+    validated BOOLEAN DEFAULT FALSE, -- Has user registered and claimed this key?
+    validated_at TIMESTAMP WITH TIME ZONE, -- When was it validated?
     expires_at TIMESTAMP WITH TIME ZONE,
     max_uses INTEGER DEFAULT 1,
     current_uses INTEGER DEFAULT 0,
