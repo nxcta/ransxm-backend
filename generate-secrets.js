@@ -35,3 +35,4 @@ console.log(`RANSXM_API_KEY=${apiKey}`);
 console.log('FRONTEND_URL=https://your-frontend.vercel.app');
 console.log('-----------------------------------');
 
+

@@ -1,12 +1,12 @@
 const express = require('express');
 const supabase = require('../db/supabase');
-const { validateLimiter, requireApiKey, securityLog, validateKeyFormat } = require('../middleware/security');
+const { validateLimiter, securityLog, validateKeyFormat } = require('../middleware/security');
 
 const router = express.Router();
 
 // Validate key (called from Lua script)
-// Rate limited and optionally requires API key
-router.post('/', validateLimiter, requireApiKey, async (req, res) => {
+// Rate limited - NO API key required (validation should be open)
+router.post('/', validateLimiter, async (req, res) => {
     try {
         const { key, hwid, game_id, executor } = req.body;
         const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
