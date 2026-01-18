@@ -52,40 +52,61 @@ router.post('/', async (req, res) => {
             });
         }
         
-        // Check max uses
-        if (keyData.max_uses > 0 && keyData.current_uses >= keyData.max_uses) {
+        // Check HWID first
+        let hwidMatches = false;
+        let isNewHwid = false;
+        
+        if (hwid) {
+            if (keyData.hwid) {
+                // Key has HWID locked
+                if (keyData.hwid === hwid) {
+                    // Same device - allow access (bypass uses check)
+                    hwidMatches = true;
+                } else {
+                    // Different device - reject
+                    return res.json({ 
+                        valid: false, 
+                        error: 'Key is locked to another device' 
+                    });
+                }
+            } else {
+                // No HWID locked yet - this is a new activation
+                isNewHwid = true;
+            }
+        }
+        
+        // Check max uses (only if HWID doesn't match - new device or first use)
+        if (!hwidMatches && keyData.max_uses > 0 && keyData.current_uses >= keyData.max_uses) {
             return res.json({ 
                 valid: false, 
                 error: 'Key has reached maximum uses' 
             });
         }
         
-        // Check HWID
-        if (hwid) {
-            if (keyData.hwid && keyData.hwid !== hwid) {
-                return res.json({ 
-                    valid: false, 
-                    error: 'Key is locked to another device' 
-                });
-            }
-            
-            // Lock HWID if not set
-            if (!keyData.hwid) {
-                await supabase
-                    .from('keys')
-                    .update({ hwid })
-                    .eq('id', keyData.id);
-            }
+        // Lock HWID if this is a new activation
+        if (isNewHwid) {
+            await supabase
+                .from('keys')
+                .update({ hwid })
+                .eq('id', keyData.id);
         }
         
-        // Update usage count
-        await supabase
-            .from('keys')
-            .update({ 
-                current_uses: keyData.current_uses + 1,
-                last_used: new Date().toISOString()
-            })
-            .eq('id', keyData.id);
+        // Update usage count (only increment on new activations, not re-logins)
+        if (!hwidMatches) {
+            await supabase
+                .from('keys')
+                .update({ 
+                    current_uses: keyData.current_uses + 1,
+                    last_used: new Date().toISOString()
+                })
+                .eq('id', keyData.id);
+        } else {
+            // Just update last_used for returning users
+            await supabase
+                .from('keys')
+                .update({ last_used: new Date().toISOString() })
+                .eq('id', keyData.id);
+        }
         
         // Log usage
         await supabase

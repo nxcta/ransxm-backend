@@ -214,6 +214,28 @@ router.post('/:id/reset-hwid', verifyToken, requireAdmin, async (req, res) => {
     }
 });
 
+// Reset Uses (admin only)
+router.post('/:id/reset-uses', verifyToken, requireAdmin, async (req, res) => {
+    try {
+        const { data: updatedKey, error } = await supabase
+            .from('keys')
+            .update({ current_uses: 0 })
+            .eq('id', req.params.id)
+            .select()
+            .single();
+        
+        if (error) throw error;
+        
+        res.json({
+            message: 'Uses reset successfully',
+            key: updatedKey
+        });
+    } catch (error) {
+        console.error('Reset uses error:', error);
+        res.status(500).json({ error: 'Failed to reset uses' });
+    }
+});
+
 // Delete key (admin only)
 router.delete('/:id', verifyToken, requireAdmin, async (req, res) => {
     try {
