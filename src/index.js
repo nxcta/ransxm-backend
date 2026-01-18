@@ -33,7 +33,8 @@ app.get('/api/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         message: 'RANSXM API is running',
-        version: '1.0.0'
+        version: '2.0.0-roles',
+        deployed: new Date().toISOString()
     });
 });
 
