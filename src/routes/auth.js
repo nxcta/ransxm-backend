@@ -113,14 +113,19 @@ router.post('/login', async (req, res) => {
             return res.status(400).json({ error: 'Email and password required' });
         }
         
-        // Find user with their key info
+        // Find user
         const { data: user, error } = await supabase
             .from('users')
-            .select('*, keys(*)')
+            .select('*')
             .eq('email', email)
             .single();
         
-        if (error || !user) {
+        if (error) {
+            console.log('Login DB error:', error.message);
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        
+        if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         
@@ -128,6 +133,7 @@ router.post('/login', async (req, res) => {
         const validPassword = await bcrypt.compare(password, user.password_hash);
         
         if (!validPassword) {
+            console.log('Password mismatch for:', email);
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         
