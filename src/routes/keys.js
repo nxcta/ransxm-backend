@@ -26,7 +26,7 @@ router.get('/', verifyToken, requireAdmin, async (req, res) => {
         
         let query = supabase
             .from('keys')
-            .select('*, users(email)', { count: 'exact' })
+            .select('*', { count: 'exact' })
             .order('created_at', { ascending: false })
             .range(offset, offset + limit - 1);
         
@@ -40,13 +40,16 @@ router.get('/', verifyToken, requireAdmin, async (req, res) => {
         
         const { data: keys, error, count } = await query;
         
-        if (error) throw error;
+        if (error) {
+            console.error('Keys query error:', error);
+            throw error;
+        }
         
         res.json({
-            keys,
-            total: count,
+            keys: keys || [],
+            total: count || 0,
             page: parseInt(page),
-            totalPages: Math.ceil(count / limit)
+            totalPages: Math.ceil((count || 0) / limit)
         });
     } catch (error) {
         console.error('Get keys error:', error);
