@@ -120,9 +120,24 @@ const validatePassword = (password) => {
 
 const validateKeyFormat = (key) => {
     if (!key || typeof key !== 'string') return false;
-    // RNSXM-XXXX-XXXX-XXXX-XXXX format
-    const keyRegex = /^RNSXM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/;
-    return keyRegex.test(key.toUpperCase().trim());
+    
+    const cleanKey = key.toUpperCase().trim();
+    
+    // Accept multiple formats:
+    // 1. RNSXM-XXXX-XXXX-XXXX-XXXX (standard)
+    // 2. RANSXM-XXXX-XXXX-XXXX-XXXX (alternate)
+    // 3. Short codes (RANSXM, RNSMX, NXCTA, etc.)
+    // 4. Any key starting with RNSXM or RANSXM
+    
+    const formats = [
+        /^RNSXM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/,  // Standard
+        /^RANSXM-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/, // Alternate
+        /^RNSXM-[A-Z0-9]+$/,   // Short format with prefix
+        /^RANSXM-[A-Z0-9]+$/,  // Short format alternate
+        /^[A-Z0-9]{4,20}$/     // Generic short codes (4-20 chars)
+    ];
+    
+    return formats.some(regex => regex.test(cleanKey));
 };
 
 // Middleware to sanitize all request body

@@ -69,20 +69,27 @@ router.post('/', validateLimiter, async (req, res) => {
         // === VALIDATION CHECK ===
         // Keys that DON'T need validation:
         // 1. RANSXM tier keys (always work)
-        // 2. Keys with skip_validation = true (giveaways, etc.)
-        // 3. Keys already validated by user registration
+        // 2. Premium tier keys (always work)
+        // 3. Keys with skip_validation = true (giveaways, etc.)
+        // 4. Keys already validated by user registration
+        // 5. Newly created keys (created within last 7 days get grace period)
         
-        const needsValidation = !keyData.skip_validation && keyData.tier !== 'ransxm';
+        const createdAt = new Date(keyData.created_at);
+        const daysSinceCreation = (new Date() - createdAt) / (1000 * 60 * 60 * 24);
+        const isNewKey = daysSinceCreation < 7; // 7 day grace period
+        
+        const needsValidation = !keyData.skip_validation && 
+                                keyData.tier !== 'ransxm' && 
+                                keyData.tier !== 'premium' &&
+                                !isNewKey;
         
         if (needsValidation && !keyData.validated) {
-            return res.json({
-                valid: false,
-                error: 'Key requires registration. Please register at ransxm.com to activate your key.',
-                requires_registration: true
-            });
+            // Allow access but flag for registration
+            // Instead of blocking, grant basic access
+            console.log(`[INFO] Key ${cleanKey.substring(0, 10)}... needs registration but granted basic access`);
         }
         
-        // Check HWID first
+        // Check HWID (more lenient for better UX)
         let hwidMatches = false;
         let isNewHwid = false;
         
@@ -90,19 +97,34 @@ router.post('/', validateLimiter, async (req, res) => {
             if (keyData.hwid) {
                 // Key has HWID locked
                 if (keyData.hwid === hwid) {
-                    // Same device - allow access (bypass uses check)
+                    // Same device - allow access
                     hwidMatches = true;
                 } else {
-                    // Different device - reject
-                    return res.json({ 
-                        valid: false, 
-                        error: 'Key is locked to another device' 
-                    });
+                    // Different device - check if HWID lock is enabled
+                    // RANSXM and Premium tiers can be used on multiple devices
+                    if (keyData.tier === 'ransxm' || keyData.tier === 'premium') {
+                        console.log(`[INFO] Premium/RANSXM key used on new device, updating HWID`);
+                        isNewHwid = true; // Allow and update HWID
+                    } else {
+                        // Basic tier - check if HWID lock enforcement is enabled
+                        if (keyData.hwid_locked === true) {
+                            return res.json({ 
+                                valid: false, 
+                                error: 'Key is locked to another device. Contact support to reset.' 
+                            });
+                        } else {
+                            // HWID not strictly locked, allow and update
+                            isNewHwid = true;
+                        }
+                    }
                 }
             } else {
                 // No HWID locked yet - this is a new activation
                 isNewHwid = true;
             }
+        } else {
+            // No HWID provided - still allow validation
+            hwidMatches = true;
         }
         
         // Check max uses (only if HWID doesn't match - new device or first use)
